@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets\blotic_logo.ico</ApplicationIcon>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <AssemblyName>BloticArena</AssemblyName>
+    <RootNamespace>BloticArena</RootNamespace>
+    <UseWindowsForms>false</UseWindowsForms>
+    
+    <!-- Application Metadata -->
+    <AssemblyTitle>Blotic Arena</AssemblyTitle>
+    <Product>Blotic Arena</Product>
+    <Company>Blotic BVUCOEP</Company>
+    <Description>Desktop Gaming Launcher for Blotic Arena</Description>
+    <Copyright>Copyright © 2025 Blotic BVUCOEP</Copyright>
+    <Version>1.0.0</Version>
+    <FileVersion>1.0.0.0</FileVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+    <PackageReference Include="QRCoder" Version="1.4.3" />
+    <PackageReference Include="supabase-csharp" Version="0.15.2" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\blotic_logo.png" />
+    <Resource Include="Assets\blotic_logo.ico" />
+  </ItemGroup>
+
+</Project>
