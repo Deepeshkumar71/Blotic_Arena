@@ -88,7 +88,7 @@ All documentation files are organized in the `docs/` folder:
 
 ## 🔗 Links
 
-- [Blotic Website](https://blotic.bvucoep.edu.in)
+- [Blotic Website](https://blotic-bvucoep.vercel.app/)
 - [GitHub Repository](https://github.com/Deepeshkumar71/Blotic_Arena)
 
 ## 📝 License
