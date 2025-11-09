@@ -25,8 +25,8 @@
 4. **That's it!** No installation needed
 
 ### For Distribution
-- Upload `BloticArena.exe` to GitHub Releases
-- Users can download and run immediately
+- `BloticArena.exe` is stored in the repository via Git LFS
+- Users can clone the repository to get the executable
 - No installer required
 - 100% portable
 
@@ -120,7 +120,7 @@ None reported in v1.0.0
 ## 📞 Support
 
 For issues or questions:
-- GitHub Issues: [Create an issue](../../issues)
+- GitHub Issues: [Create an issue](https://github.com/Deepeshkumar71/Blotic_Arena/issues)
 - Email: support@blotic.bvucoep.edu.in
 - Website: https://blotic.bvucoep.edu.in
 

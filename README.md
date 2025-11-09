@@ -10,10 +10,12 @@ A modern, sleek desktop application for managing and launching games from the Bl
 ## 🚀 Quick Start
 
 ### For Users
-1. Download `BloticArena.exe` from the [Releases](../../releases) page
+1. Download `BloticArena.exe` from the repository (stored via Git LFS)
 2. Double-click to run - **No installation required!**
 3. Scan the QR code with your phone to login
 4. Start playing your favorite games!
+
+**Note**: The executable is tracked with Git LFS. Clone the repository to get the full application.
 
 ### Production Build
 - **File**: `BloticArena.exe` (189 MB)
@@ -87,7 +89,7 @@ All documentation files are organized in the `docs/` folder:
 ## 🔗 Links
 
 - [Blotic Website](https://blotic.bvucoep.edu.in)
-- [GitHub Repository](https://github.com/yourusername/Blotic_Website)
+- [GitHub Repository](https://github.com/Deepeshkumar71/Blotic_Arena)
 
 ## 📝 License
 
