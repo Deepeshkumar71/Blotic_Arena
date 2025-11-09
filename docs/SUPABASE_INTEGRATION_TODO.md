@@ -8,13 +8,12 @@ Integrate Supabase as a cross-server authentication and game sync system for Blo
 - Backup server functionality for the website
 
 ## Supabase Configuration
-**Project URL:** `https://rtngwbfpreyyrwrquoy.supabase.co`
+**Project URL:** `[CONFIGURED IN CONFIG FILE]`
 
 **Keys:**
-- Anon Public: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0bmd3YmZwcmV5eXJtd3JxdW95Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1MzY2MzgsImV4cCI6MjA3ODExMjYzOH0.q6rFTue_tMDVPoSratjgPQ9geQ2XiF5NgPnF6M1Ivdg`
-- Service Role: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0bmd3YmZwcmV5eXJtd3JxdW95Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MjUzNjYzOCwiZXhwIjoyMDc4MTEyNjM4fQ.t3XDJ42mq8iNImT6uf8K2O0DsyFSIsBpEBwTuHTvf8Y`
-- API Secret: `sb_secret_59te81UQ33GEPnN_dqfLlg_z22CvEMx`
-- Publishable: `sb_publishable_tWMHLMn8ywHOwkY7KJKl8A_Eehritpu`
+- Keys are stored securely in `Config/SupabaseConfig.cs`
+- Never commit API keys to version control
+- Use environment variables for production deployment
 
 ---
 
