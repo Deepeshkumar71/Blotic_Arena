@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
+using System.Windows.Data;
 using System.Windows.Threading;
 using BloticArena.Models;
 using BloticArena.Services;
@@ -29,29 +30,35 @@ namespace BloticArena
         private List<AppInfo> _allApps = new();
         private List<AppInfo> _favoriteGames = new();
         private readonly AppScanner _scanner = new();
-        private readonly List<Ellipse> _particles = new();
-        private readonly List<System.Windows.Shapes.Line> _particleLines = new();
         private readonly Random _random = new();
-        private readonly DispatcherTimer _particleTimer;
         private string _currentPage = "Home";
+        
+        // Screensaver fields
+        private DispatcherTimer _screensaverTimer;
+        private readonly List<Ellipse> _screensaverParticles = new();
+        private readonly List<System.Windows.Shapes.Line> _screensaverParticleLines = new();
+        private DispatcherTimer _screensaverParticleTimer;
+        private bool _isScreensaverActive = false;
+        private DateTime _lastActivityTime = DateTime.Now;
+
+        // Home page video fields
+        private readonly List<Ellipse> _homeParticles = new();
+        private readonly List<System.Windows.Shapes.Line> _homeParticleLines = new();
+        private DispatcherTimer _homeParticleTimer;
 
         public MainWindow()
         {
             InitializeComponent();
             Loaded += MainWindow_Loaded;
-            
-            // Initialize particle animation
-            _particleTimer = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromMilliseconds(20) // Even faster update
-            };
-            _particleTimer.Tick += ParticleTimer_Tick;
-            _particleTimer.Start();
-            
-            CreateParticles();
             LoadFavorites();
             InitializeSupabase();
             LoadApplications();
+            
+            // Initialize home video particles
+            InitializeHomeVideo();
+            
+            // Initialize screensaver
+            InitializeScreensaver();
         }
 
         private async void InitializeSupabase()
@@ -225,7 +232,9 @@ namespace BloticArena
             Dispatcher.Invoke(() =>
             {
                 System.Diagnostics.Debug.WriteLine($"❌ Authentication failed: {error}");
-                MessageBox.Show($"Authentication failed: {error}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                Controls.CustomAlert.Show(AlertContainer, "Authentication Error", 
+                    $"Authentication failed: {error}", 
+                    Controls.CustomAlert.AlertType.Error);
             });
         }
 
@@ -234,7 +243,9 @@ namespace BloticArena
             Dispatcher.Invoke(() =>
             {
                 System.Diagnostics.Debug.WriteLine("⏰ QR session expired");
-                MessageBox.Show("QR code expired. Please generate a new one.", "Session Expired", MessageBoxButton.OK, MessageBoxImage.Warning);
+                Controls.CustomAlert.Show(AlertContainer, "Session Expired", 
+                    "QR code expired. Please generate a new one.", 
+                    Controls.CustomAlert.AlertType.Warning);
             });
         }
 
@@ -258,7 +269,10 @@ namespace BloticArena
                 
                 // Fetch and display profile picture and game count
                 await UpdateProfileButton(user.Id);
+                await UpdateGamesStatistics(user.Id.ToString());
                 await UpdateGameCount(user.Id);
+                
+                System.Diagnostics.Debug.WriteLine($"🎮 UI Updated for authenticated user: {user.Username}, Games: {user.GamesRemaining}");
                 
                 // If we're on the profile page, refresh it to show profile instead of QR
                 if (_currentPage == "Profile")
@@ -324,11 +338,12 @@ namespace BloticArena
                     var registrationResponse = await client
                         .From<EventRegistration>()
                         .Where(x => x.UserId == userId)
+                        .Where(x => x.PaymentStatus == "paid")
                         .Get();
                     
                     if (registrationResponse?.Models != null && registrationResponse.Models.Count > 0)
                     {
-                        // Sum all games from all registrations
+                        // Sum all games from paid registrations only
                         var totalGames = registrationResponse.Models.Sum(r => r.GamesRemaining);
                         
                         // Find and update badge in the button template
@@ -374,46 +389,375 @@ namespace BloticArena
             await LoadApplications();
         }
 
-        private void CreateParticles()
+
+        #region Home Video Methods
+        
+        private void InitializeHomeVideo()
         {
-            // Create particles with pitch white color
-            for (int i = 0; i < 100; i++)
+            // Initialize home particle animation timer
+            _homeParticleTimer = new DispatcherTimer
             {
-                var size = _random.Next(3, 6); // Bigger particles
+                Interval = TimeSpan.FromMilliseconds(20)
+            };
+            _homeParticleTimer.Tick += HomeParticleTimer_Tick;
+            _homeParticleTimer.Start();
+            
+            // Create home particles
+            CreateHomeParticles();
+            
+            System.Diagnostics.Debug.WriteLine("✅ Home video particles initialized");
+        }
+        
+        private void CreateHomeParticles()
+        {
+            // Create white connecting star particles for home page with random flow
+            for (int i = 0; i < 150; i++)
+            {
+                var size = _random.Next(2, 5);
                 var particle = new Ellipse
                 {
                     Width = size,
                     Height = size,
                     Fill = new SolidColorBrush(Color.FromArgb(
-                        255,  // Full opacity - pitch white
-                        255,  // Full white
-                        255,  // Full white  
-                        255   // Full white
+                        180,  // Semi-transparent
+                        255,  // White color
+                        255,
+                        255
                     )),
-                    Tag = new Point(_random.NextDouble() * 5.1 - 2.55, _random.NextDouble() * 5.1 - 2.55) // 70% faster: 3 * 1.7 = 5.1
+                    // Random velocity in all directions for natural flow
+                    Tag = new Point(
+                        (_random.NextDouble() - 0.5) * 3.0, // Random X velocity between -1.5 and 1.5
+                        (_random.NextDouble() - 0.5) * 3.0  // Random Y velocity between -1.5 and 1.5
+                    )
                 };
 
-                Canvas.SetLeft(particle, _random.Next(0, (int)Width));
-                Canvas.SetTop(particle, _random.Next(0, (int)Height));
+                // Start particles at completely random positions across the entire screen
+                Canvas.SetLeft(particle, _random.NextDouble() * 1920); // Full screen width
+                Canvas.SetTop(particle, _random.NextDouble() * 1080);  // Full screen height
                 
-                ParticleCanvas.Children.Add(particle);
-                _particles.Add(particle);
+                HomeParticleCanvas.Children.Add(particle);
+                _homeParticles.Add(particle);
             }
         }
-
-        private void ParticleTimer_Tick(object? sender, EventArgs e)
+        
+        private void HomeParticleTimer_Tick(object? sender, EventArgs e)
         {
             try
             {
                 // Clear old lines efficiently
-                for (int i = _particleLines.Count - 1; i >= 0; i--)
+                for (int i = _homeParticleLines.Count - 1; i >= 0; i--)
                 {
-                    ParticleCanvas.Children.Remove(_particleLines[i]);
+                    HomeParticleCanvas.Children.Remove(_homeParticleLines[i]);
                 }
-                _particleLines.Clear();
+                _homeParticleLines.Clear();
 
                 // Move particles
-                foreach (var particle in _particles)
+                foreach (var particle in _homeParticles)
+                {
+                    var velocity = (Point)particle.Tag;
+                    var left = Canvas.GetLeft(particle) + velocity.X;
+                    var top = Canvas.GetTop(particle) + velocity.Y;
+
+                    // Wrap around edges (full screen like screensaver)
+                    if (left < 0) left = ActualWidth;
+                    if (left > ActualWidth) left = 0;
+                    if (top < 0) top = ActualHeight;
+                    if (top > ActualHeight) top = 0;
+
+                    Canvas.SetLeft(particle, left);
+                    Canvas.SetTop(particle, top);
+                }
+
+                // Draw connecting lines between nearby particles (same as screensaver)
+                for (int i = 0; i < _homeParticles.Count; i++)
+                {
+                    var p1 = _homeParticles[i];
+                    var x1 = Canvas.GetLeft(p1) + p1.Width / 2;
+                    var y1 = Canvas.GetTop(p1) + p1.Height / 2;
+
+                    for (int j = i + 1; j < _homeParticles.Count; j++)
+                    {
+                        var p2 = _homeParticles[j];
+                        var x2 = Canvas.GetLeft(p2) + p2.Width / 2;
+                        var y2 = Canvas.GetTop(p2) + p2.Height / 2;
+
+                        var distance = Math.Sqrt(Math.Pow(x2 - x1, 2) + Math.Pow(y2 - y1, 2));
+
+                        // Draw line if particles are close (within 200px same as screensaver)
+                        if (distance < 200)
+                        {
+                            var opacity = (byte)(100 * (1 - distance / 200)); // Same opacity calculation as screensaver
+                            var line = new System.Windows.Shapes.Line
+                            {
+                                X1 = x1,
+                                Y1 = y1,
+                                X2 = x2,
+                                Y2 = y2,
+                                Stroke = new SolidColorBrush(Color.FromArgb(
+                                    opacity,
+                                    255, 255, 255 // White color
+                                )),
+                                StrokeThickness = 1.5, // Same thickness as screensaver
+                                IsHitTestVisible = false
+                            };
+                            HomeParticleCanvas.Children.Add(line);
+                            _homeParticleLines.Add(line);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Silently handle any particle rendering errors
+            }
+        }
+        
+        private void HomeVideo_MediaEnded(object sender, RoutedEventArgs e)
+        {
+            // Loop the home video
+            HomeVideo.Position = TimeSpan.Zero;
+            HomeVideo.Play();
+        }
+        
+        #endregion
+
+        #region Screensaver Methods
+        
+        private void InitializeScreensaver()
+        {
+            // Initialize screensaver timer (15 seconds for testing)
+            _screensaverTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(15)
+            };
+            _screensaverTimer.Tick += ScreensaverTimer_Tick;
+            _screensaverTimer.Start();
+            
+            // Initialize screensaver particle animation
+            _screensaverParticleTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(20)
+            };
+            _screensaverParticleTimer.Tick += ScreensaverParticleTimer_Tick;
+            
+            // Add event handlers for user activity detection
+            this.MouseMove += OnUserActivity;
+            this.KeyDown += OnUserActivity;
+            this.MouseDown += OnUserActivity;
+            this.MouseWheel += OnUserActivity;
+            
+            System.Diagnostics.Debug.WriteLine("✅ Screensaver initialized with 15 second timeout (fullscreen only)");
+        }
+        
+        private void OnUserActivity(object sender, EventArgs e)
+        {
+            // Don't process activity if we're currently showing/hiding screensaver
+            if (_isScreensaverActive && ScreensaverOverlay.Opacity < 1.0)
+                return;
+                
+            _lastActivityTime = DateTime.Now;
+            
+            if (_isScreensaverActive)
+            {
+                HideScreensaver();
+            }
+        }
+        
+        private void ScreensaverTimer_Tick(object? sender, EventArgs e)
+        {
+            // Only activate screensaver if in fullscreen mode and enough time has passed
+            if (!_isScreensaverActive && 
+                WindowState == WindowState.Maximized && 
+                DateTime.Now - _lastActivityTime >= TimeSpan.FromSeconds(15))
+            {
+                ShowScreensaver();
+            }
+        }
+        
+        private void ShowScreensaver()
+        {
+            if (_isScreensaverActive) return;
+            
+            _isScreensaverActive = true;
+            
+            // Temporarily disable user activity detection during setup
+            this.MouseMove -= OnUserActivity;
+            this.KeyDown -= OnUserActivity;
+            this.MouseDown -= OnUserActivity;
+            this.MouseWheel -= OnUserActivity;
+            
+            // Create screensaver particles
+            CreateScreensaverParticles();
+            
+            // Show screensaver overlay
+            ScreensaverOverlay.Visibility = Visibility.Visible;
+            ScreensaverOverlay.Opacity = 0;
+            
+            // Start video playback
+            try
+            {
+                System.Diagnostics.Debug.WriteLine($"🎬 Starting video playback...");
+                
+                // Try multiple paths for video file
+                var possiblePaths = new[]
+                {
+                    System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Media", "blotic-video-compressed.mp4"),
+                    System.IO.Path.Combine(Environment.CurrentDirectory, "Media", "blotic-video-compressed.mp4"),
+                    @"d:\GitHub\Blotic Arena\Blotic_Arena\Media\blotic-video-compressed.mp4"
+                };
+                
+                string? workingPath = null;
+                foreach (var path in possiblePaths)
+                {
+                    System.Diagnostics.Debug.WriteLine($"📁 Checking path: {path}");
+                    if (System.IO.File.Exists(path))
+                    {
+                        workingPath = path;
+                        System.Diagnostics.Debug.WriteLine($"✅ Found video at: {path}");
+                        break;
+                    }
+                }
+                
+                if (workingPath != null)
+                {
+                    // Set absolute path as source
+                    ScreensaverVideo.Source = new Uri(workingPath, UriKind.Absolute);
+                    
+                    // Ensure video is visible and reset position
+                    ScreensaverVideo.Visibility = Visibility.Visible;
+                    ScreensaverVideo.Position = TimeSpan.Zero;
+                    
+                    // Force load the media
+                    ScreensaverVideo.LoadedBehavior = MediaState.Manual;
+                    ScreensaverVideo.UnloadedBehavior = MediaState.Manual;
+                    
+                    // Try to play
+                    ScreensaverVideo.Play();
+                    
+                    System.Diagnostics.Debug.WriteLine($"▶️ Video play command sent");
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"❌ Video file not found in any location");
+                    ScreensaverVideo.Visibility = Visibility.Collapsed;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"⚠️ Video playback error: {ex.Message}");
+                ScreensaverVideo.Visibility = Visibility.Collapsed;
+            }
+            
+            // Start screensaver particle animation
+            _screensaverParticleTimer.Start();
+            
+            // Smooth fade in animation (2 seconds)
+            var fadeIn = new DoubleAnimation
+            {
+                From = 0,
+                To = 1,
+                Duration = TimeSpan.FromMilliseconds(2000),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+            };
+            
+            fadeIn.Completed += (s, e) =>
+            {
+                // Re-enable user activity detection after fade-in completes
+                this.MouseMove += OnUserActivity;
+                this.KeyDown += OnUserActivity;
+                this.MouseDown += OnUserActivity;
+                this.MouseWheel += OnUserActivity;
+            };
+            
+            ScreensaverOverlay.BeginAnimation(OpacityProperty, fadeIn);
+            
+            System.Diagnostics.Debug.WriteLine("🌟 Screensaver activated with smooth fade-in");
+        }
+        
+        private void HideScreensaver()
+        {
+            if (!_isScreensaverActive) return;
+            
+            _isScreensaverActive = false;
+            
+            // Smooth fade out animation (1.5 seconds)
+            var fadeOut = new DoubleAnimation
+            {
+                From = 1,
+                To = 0,
+                Duration = TimeSpan.FromMilliseconds(1500),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+            };
+            
+            fadeOut.Completed += (s, e) =>
+            {
+                // Stop video playback after fade out
+                ScreensaverVideo.Stop();
+                
+                // Stop screensaver particle animation
+                _screensaverParticleTimer.Stop();
+                
+                // Clear screensaver particles
+                ScreensaverParticleCanvas.Children.Clear();
+                _screensaverParticles.Clear();
+                _screensaverParticleLines.Clear();
+                
+                // Hide overlay
+                ScreensaverOverlay.Visibility = Visibility.Collapsed;
+                
+                System.Diagnostics.Debug.WriteLine("🌟 Screensaver deactivated with smooth fade-out");
+            };
+            
+            ScreensaverOverlay.BeginAnimation(OpacityProperty, fadeOut);
+            
+            System.Diagnostics.Debug.WriteLine("🌟 Screensaver fade-out started");
+        }
+        
+        private void CreateScreensaverParticles()
+        {
+            // Create white connecting star particles for screensaver with random flow
+            for (int i = 0; i < 150; i++)
+            {
+                var size = _random.Next(2, 5);
+                var particle = new Ellipse
+                {
+                    Width = size,
+                    Height = size,
+                    Fill = new SolidColorBrush(Color.FromArgb(
+                        180,  // Semi-transparent
+                        255,  // White color
+                        255,
+                        255
+                    )),
+                    // Random velocity in all directions for natural flow
+                    Tag = new Point(
+                        (_random.NextDouble() - 0.5) * 3.0, // Random X velocity between -1.5 and 1.5
+                        (_random.NextDouble() - 0.5) * 3.0  // Random Y velocity between -1.5 and 1.5
+                    )
+                };
+
+                // Start particles at completely random positions across the entire screen
+                Canvas.SetLeft(particle, _random.NextDouble() * 1920); // Full screen width
+                Canvas.SetTop(particle, _random.NextDouble() * 1080);  // Full screen height
+                
+                ScreensaverParticleCanvas.Children.Add(particle);
+                _screensaverParticles.Add(particle);
+            }
+        }
+        
+        private void ScreensaverParticleTimer_Tick(object? sender, EventArgs e)
+        {
+            try
+            {
+                // Clear old lines efficiently
+                for (int i = _screensaverParticleLines.Count - 1; i >= 0; i--)
+                {
+                    ScreensaverParticleCanvas.Children.Remove(_screensaverParticleLines[i]);
+                }
+                _screensaverParticleLines.Clear();
+
+                // Move particles
+                foreach (var particle in _screensaverParticles)
                 {
                     var velocity = (Point)particle.Tag;
                     var left = Canvas.GetLeft(particle) + velocity.X;
@@ -429,25 +773,25 @@ namespace BloticArena
                     Canvas.SetTop(particle, top);
                 }
 
-                // Draw lines between nearby particles (website style)
-                for (int i = 0; i < _particles.Count; i++)
+                // Draw connecting lines between nearby particles
+                for (int i = 0; i < _screensaverParticles.Count; i++)
                 {
-                    var p1 = _particles[i];
+                    var p1 = _screensaverParticles[i];
                     var x1 = Canvas.GetLeft(p1) + p1.Width / 2;
                     var y1 = Canvas.GetTop(p1) + p1.Height / 2;
 
-                    for (int j = i + 1; j < _particles.Count; j++)
+                    for (int j = i + 1; j < _screensaverParticles.Count; j++)
                     {
-                        var p2 = _particles[j];
+                        var p2 = _screensaverParticles[j];
                         var x2 = Canvas.GetLeft(p2) + p2.Width / 2;
                         var y2 = Canvas.GetTop(p2) + p2.Height / 2;
 
                         var distance = Math.Sqrt(Math.Pow(x2 - x1, 2) + Math.Pow(y2 - y1, 2));
 
-                        // Draw line if particles are close (within 180px for more connections)
-                        if (distance < 180)
+                        // Draw line if particles are close (within 200px for screensaver)
+                        if (distance < 200)
                         {
-                            var opacity = (byte)(100 * (1 - distance / 180)); // More visible lines
+                            var opacity = (byte)(100 * (1 - distance / 200)); // White connecting lines
                             var line = new System.Windows.Shapes.Line
                             {
                                 X1 = x1,
@@ -456,13 +800,13 @@ namespace BloticArena
                                 Y2 = y2,
                                 Stroke = new SolidColorBrush(Color.FromArgb(
                                     opacity,
-                                    255, 255, 255 // Bright white
+                                    255, 255, 255 // White color
                                 )),
-                                StrokeThickness = 1.0, // Thicker lines
-                                IsHitTestVisible = false // Improve performance
+                                StrokeThickness = 1.5,
+                                IsHitTestVisible = false
                             };
-                            ParticleCanvas.Children.Add(line);
-                            _particleLines.Add(line);
+                            ScreensaverParticleCanvas.Children.Add(line);
+                            _screensaverParticleLines.Add(line);
                         }
                     }
                 }
@@ -472,6 +816,40 @@ namespace BloticArena
                 // Silently handle any particle rendering errors
             }
         }
+        
+        private void ScreensaverVideo_MediaEnded(object sender, RoutedEventArgs e)
+        {
+            // Loop the video
+            ScreensaverVideo.Position = TimeSpan.Zero;
+            ScreensaverVideo.Play();
+        }
+        
+        private void ScreensaverVideo_MediaOpened(object sender, RoutedEventArgs e)
+        {
+            System.Diagnostics.Debug.WriteLine($"✅ Video loaded successfully");
+            System.Diagnostics.Debug.WriteLine($"📹 Video dimensions: {ScreensaverVideo.NaturalVideoWidth}x{ScreensaverVideo.NaturalVideoHeight}");
+            System.Diagnostics.Debug.WriteLine($"⏱️ Video duration: {ScreensaverVideo.NaturalDuration}");
+            
+            // Ensure video is visible
+            ScreensaverVideo.Visibility = Visibility.Visible;
+        }
+        
+        private void ScreensaverVideo_MediaFailed(object sender, ExceptionRoutedEventArgs e)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ Video failed to load: {e.ErrorException?.Message}");
+            System.Diagnostics.Debug.WriteLine($"🔍 Current working directory: {Environment.CurrentDirectory}");
+            System.Diagnostics.Debug.WriteLine($"📁 Looking for video file...");
+            
+            // Try to find the video file
+            var videoPath = System.IO.Path.Combine(Environment.CurrentDirectory, "Media", "blotic-video-compressed.mp4");
+            System.Diagnostics.Debug.WriteLine($"📍 Full video path: {videoPath}");
+            System.Diagnostics.Debug.WriteLine($"📄 File exists: {System.IO.File.Exists(videoPath)}");
+            
+            // Hide video if it fails
+            ScreensaverVideo.Visibility = Visibility.Collapsed;
+        }
+        
+        #endregion
 
         private async Task LoadApplications()
         {
@@ -504,7 +882,9 @@ namespace BloticArena
                 // Check if user is authenticated
                 if (!Services.AuthService.Instance.IsAuthenticated)
                 {
-                    MessageBox.Show("Please login to play games.", "Login Required", MessageBoxButton.OK, MessageBoxImage.Information);
+                    Controls.CustomAlert.Show(AlertContainer, "Login Required", 
+                        "Please login to play games.", 
+                        Controls.CustomAlert.AlertType.Info);
                     return;
                 }
 
@@ -527,15 +907,18 @@ namespace BloticArena
                 var client = Services.SupabaseService.Instance.Client;
                 if (client == null) return false;
 
-                // Get all registrations
+                // Get paid registrations only
                 var registrationResponse = await client
                     .From<EventRegistration>()
                     .Where(x => x.UserId == user.Id)
+                    .Where(x => x.PaymentStatus == "paid")
                     .Get();
 
                 if (registrationResponse?.Models == null || registrationResponse.Models.Count == 0)
                 {
-                    MessageBox.Show("No active game registration found. Please register for an event.", "No Registration", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    Controls.CustomAlert.Show(AlertContainer, "No Registration", 
+                        "No active game registration found. Please register for an event.", 
+                        Controls.CustomAlert.AlertType.Warning);
                     return false;
                 }
 
@@ -548,7 +931,9 @@ namespace BloticArena
                 // Check if any registration has games remaining
                 if (registration == null)
                 {
-                    MessageBox.Show("You have no games remaining. Please purchase more games or register for another event.", "No Games Remaining", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    Controls.CustomAlert.Show(AlertContainer, "No Games Remaining", 
+                        "You have no games remaining. Please purchase more games or register for another event.", 
+                        Controls.CustomAlert.AlertType.Warning);
                     return false;
                 }
 
@@ -566,6 +951,7 @@ namespace BloticArena
 
                 // Update UI
                 await UpdateGameCount(user.Id);
+                await UpdateGamesStatistics(user.Id.ToString());
                 
                 // Update profile page if visible
                 if (_currentPage == "Profile")
@@ -581,7 +967,9 @@ namespace BloticArena
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"❌ Error checking game count: {ex.Message}");
-                MessageBox.Show("Failed to verify game count. Please try again.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                Controls.CustomAlert.Show(AlertContainer, "Error", 
+                    "Failed to verify game count. Please try again.", 
+                    Controls.CustomAlert.AlertType.Error);
                 return false;
             }
         }
@@ -590,7 +978,9 @@ namespace BloticArena
         {
             if (string.IsNullOrWhiteSpace(path))
             {
-                MessageBox.Show("Application path not found.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                Controls.CustomAlert.Show(AlertContainer, "Error", 
+                    "Application path not found.", 
+                    Controls.CustomAlert.AlertType.Warning);
                 return;
             }
 
@@ -662,8 +1052,9 @@ namespace BloticArena
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to launch application:\n{ex.Message}", 
-                    "Launch Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                Controls.CustomAlert.Show(AlertContainer, "Launch Error", 
+                    $"Failed to launch application:\n{ex.Message}", 
+                    Controls.CustomAlert.AlertType.Error);
             }
         }
 
@@ -769,112 +1160,359 @@ namespace BloticArena
 
         private async void ProfileButton_Click(object sender, RoutedEventArgs e)
         {
-            // If already authenticated, show profile; otherwise show login
+            // If already authenticated, show custom dropdown; otherwise show login
             if (Services.AuthService.Instance.IsAuthenticated)
             {
-                // Show modern context menu with options
-                var contextMenu = new System.Windows.Controls.ContextMenu
-                {
-                    Background = new SolidColorBrush(Color.FromArgb(240, 20, 24, 36)),
-                    BorderBrush = Brushes.Transparent,
-                    BorderThickness = new Thickness(0),
-                    Padding = new Thickness(8),
-                    HasDropShadow = true
-                };
-                
-                // Add blur effect
-                contextMenu.Effect = new System.Windows.Media.Effects.BlurEffect
-                {
-                    Radius = 0,
-                    KernelType = System.Windows.Media.Effects.KernelType.Gaussian
-                };
-                
-                // View Profile Item
-                var profileItem = new System.Windows.Controls.MenuItem 
-                { 
-                    Header = "👤   View Profile",
-                    Foreground = Brushes.White,
-                    Background = new SolidColorBrush(Color.FromRgb(20, 24, 36)),
-                    BorderBrush = Brushes.Transparent,
-                    BorderThickness = new Thickness(0),
-                    FontSize = 14,
-                    FontWeight = FontWeights.Medium,
-                    Padding = new Thickness(16, 12, 16, 12),
-                    Height = 44
-                };
-                
-                // Style for profile item
-                var profileItemStyle = new Style(typeof(System.Windows.Controls.MenuItem));
-                profileItemStyle.Setters.Add(new Setter(System.Windows.Controls.MenuItem.BackgroundProperty, new SolidColorBrush(Color.FromRgb(20, 24, 36))));
-                profileItemStyle.Setters.Add(new Setter(System.Windows.Controls.MenuItem.BorderBrushProperty, Brushes.Transparent));
-                profileItemStyle.Setters.Add(new Setter(System.Windows.Controls.MenuItem.BorderThicknessProperty, new Thickness(0)));
-                profileItemStyle.Triggers.Add(new Trigger 
-                { 
-                    Property = System.Windows.Controls.MenuItem.IsHighlightedProperty, 
-                    Value = true,
-                    Setters = { 
-                        new Setter(System.Windows.Controls.MenuItem.BackgroundProperty, new SolidColorBrush(Color.FromRgb(45, 50, 65))),
-                        new Setter(System.Windows.Controls.MenuItem.BorderBrushProperty, Brushes.Transparent)
-                    }
-                });
-                profileItem.Style = profileItemStyle;
-                
-                profileItem.Click += (s, args) =>
-                {
-                    _currentPage = "Profile";
-                    UpdateNavigation();
-                    ShowProfilePage();
-                };
-                
-                // Logout Item with power icon
-                var logoutItem = new System.Windows.Controls.MenuItem 
-                { 
-                    Header = "⏻   Logout",
-                    Foreground = new SolidColorBrush(Color.FromRgb(239, 68, 68)),
-                    Background = new SolidColorBrush(Color.FromRgb(20, 24, 36)),
-                    BorderBrush = Brushes.Transparent,
-                    BorderThickness = new Thickness(0),
-                    FontSize = 14,
-                    FontWeight = FontWeights.Medium,
-                    Padding = new Thickness(16, 12, 16, 12),
-                    Height = 44
-                };
-                
-                // Style for logout item
-                var logoutItemStyle = new Style(typeof(System.Windows.Controls.MenuItem));
-                logoutItemStyle.Setters.Add(new Setter(System.Windows.Controls.MenuItem.BackgroundProperty, new SolidColorBrush(Color.FromRgb(20, 24, 36))));
-                logoutItemStyle.Setters.Add(new Setter(System.Windows.Controls.MenuItem.BorderBrushProperty, Brushes.Transparent));
-                logoutItemStyle.Setters.Add(new Setter(System.Windows.Controls.MenuItem.BorderThicknessProperty, new Thickness(0)));
-                var logoutTrigger = new Trigger 
-                { 
-                    Property = System.Windows.Controls.MenuItem.IsHighlightedProperty, 
-                    Value = true
-                };
-                logoutTrigger.Setters.Add(new Setter(System.Windows.Controls.MenuItem.BackgroundProperty, new SolidColorBrush(Color.FromRgb(127, 29, 29))));
-                logoutTrigger.Setters.Add(new Setter(System.Windows.Controls.MenuItem.ForegroundProperty, Brushes.White));
-                logoutTrigger.Setters.Add(new Setter(System.Windows.Controls.MenuItem.BorderBrushProperty, Brushes.Transparent));
-                logoutItemStyle.Triggers.Add(logoutTrigger);
-                logoutItem.Style = logoutItemStyle;
-                
-                logoutItem.Click += async (s, args) => await LogoutAsync();
-                
-                contextMenu.Items.Add(profileItem);
-                contextMenu.Items.Add(new System.Windows.Controls.Separator 
-                { 
-                    Background = new SolidColorBrush(Color.FromRgb(60, 65, 80)),
-                    Margin = new Thickness(8, 4, 8, 4),
-                    Height = 1
-                });
-                contextMenu.Items.Add(logoutItem);
-                
-                contextMenu.PlacementTarget = sender as System.Windows.Controls.Button;
-                contextMenu.IsOpen = true;
+                ShowCustomProfileDropdown(sender as Button);
             }
             else
             {
                 _currentPage = "Profile";
                 UpdateNavigation();
                 ShowProfilePage();
+            }
+        }
+
+        private void ShowCustomProfileDropdown(Button targetButton)
+        {
+            // Remove any existing dropdown
+            var existingDropdown = this.FindName("CustomProfileDropdown") as Grid;
+            if (existingDropdown != null)
+            {
+                // Get the main grid (inside the border) and remove existing dropdown
+                var contentBorder = this.Content as Border;
+                var contentGrid = contentBorder?.Child as Grid;
+                if (contentGrid != null && contentGrid.Children.Contains(existingDropdown))
+                {
+                    contentGrid.Children.Remove(existingDropdown);
+                }
+                return; // Toggle behavior - close if already open
+            }
+
+            // Create custom dropdown
+            var dropdown = new Grid
+            {
+                Name = "CustomProfileDropdown",
+                Background = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0)), // Transparent for click-through
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch
+            };
+
+            // Background overlay to close dropdown when clicked
+            var overlay = new Rectangle
+            {
+                Fill = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0)), // Transparent
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch
+            };
+            overlay.MouseLeftButtonDown += (s, e) => CloseCustomDropdown();
+            dropdown.Children.Add(overlay);
+
+            // Dropdown container
+            var container = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(30, 35, 50)),
+                CornerRadius = new CornerRadius(12),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(70, 75, 90)),
+                BorderThickness = new Thickness(1),
+                MinWidth = 220,
+                MaxWidth = 280,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, 70, 20, 0), // Position below profile button
+                Padding = new Thickness(0),
+                Effect = new System.Windows.Media.Effects.DropShadowEffect
+                {
+                    Color = Colors.Black,
+                    Direction = 270,
+                    ShadowDepth = 8,
+                    Opacity = 0.3,
+                    BlurRadius = 15
+                }
+            };
+
+            var stackPanel = new StackPanel();
+
+            // User info header
+            var user = Services.AuthService.Instance.CurrentUser;
+            var userHeader = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(40, 45, 60)),
+                Padding = new Thickness(20, 16, 20, 16),
+                CornerRadius = new CornerRadius(12, 12, 0, 0)
+            };
+
+            var userInfo = new StackPanel { Orientation = Orientation.Horizontal };
+            
+            // User avatar
+            var avatar = new Border
+            {
+                Width = 45,
+                Height = 45,
+                CornerRadius = new CornerRadius(22.5),
+                Background = new SolidColorBrush(Color.FromRgb(79, 156, 249)),
+                Margin = new Thickness(0, 0, 12, 0)
+            };
+            
+            var avatarText = new TextBlock
+            {
+                Text = GetInitials(user?.Username ?? "U"),
+                FontSize = 18,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            avatar.Child = avatarText;
+            
+            // User details
+            var userDetails = new StackPanel();
+            var userName = new TextBlock
+            {
+                Text = user?.Username ?? "User",
+                FontSize = 16,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.White,
+                Margin = new Thickness(0, 0, 0, 2)
+            };
+            
+            var userEmail = new TextBlock
+            {
+                Text = user?.Email ?? "user@example.com",
+                FontSize = 12,
+                Foreground = new SolidColorBrush(Color.FromRgb(156, 163, 175)),
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            
+            userDetails.Children.Add(userName);
+            userDetails.Children.Add(userEmail);
+            
+            userInfo.Children.Add(avatar);
+            userInfo.Children.Add(userDetails);
+            userHeader.Child = userInfo;
+            stackPanel.Children.Add(userHeader);
+
+            // Games count section
+            var gamesSection = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(35, 40, 55)),
+                Padding = new Thickness(20, 12, 20, 12)
+            };
+            
+            var gamesInfo = new StackPanel { Orientation = Orientation.Horizontal };
+            
+            var gamesIcon = new TextBlock
+            {
+                Text = "🎮",
+                FontSize = 16,
+                Margin = new Thickness(0, 0, 10, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            
+            var gamesText = new TextBlock
+            {
+                Text = $"{user?.GamesRemaining ?? 0} games remaining",
+                FontSize = 14,
+                FontWeight = FontWeights.Medium,
+                Foreground = new SolidColorBrush(Color.FromRgb(79, 156, 249)),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            
+            gamesInfo.Children.Add(gamesIcon);
+            gamesInfo.Children.Add(gamesText);
+            gamesSection.Child = gamesInfo;
+            stackPanel.Children.Add(gamesSection);
+
+            // Separator
+            var separator = new Rectangle
+            {
+                Height = 1,
+                Fill = new SolidColorBrush(Color.FromRgb(60, 65, 80)),
+                Margin = new Thickness(12, 0, 12, 0)
+            };
+            stackPanel.Children.Add(separator);
+
+            // Menu items
+            var menuItems = new StackPanel { Margin = new Thickness(0, 8, 0, 8) };
+
+            // View Profile
+            var profileBtn = CreateDropdownButton("👤", "View Profile", () =>
+            {
+                System.Diagnostics.Debug.WriteLine("🔽 View Profile button clicked");
+                CloseCustomDropdown();
+                
+                // Use Dispatcher.BeginInvoke for UI operations
+                Dispatcher.BeginInvoke(new Action(async () =>
+                {
+                    await Task.Delay(100);
+                    _currentPage = "Profile";
+                    UpdateNavigation();
+                    ShowProfilePage();
+                }));
+            });
+            menuItems.Children.Add(profileBtn);
+
+            // Settings (placeholder)
+            var settingsBtn = CreateDropdownButton("⚙️", "Settings", () =>
+            {
+                System.Diagnostics.Debug.WriteLine("🔽 Settings button clicked");
+                CloseCustomDropdown();
+                
+                // Use Dispatcher.BeginInvoke for UI operations
+                Dispatcher.BeginInvoke(new Action(async () =>
+                {
+                    await Task.Delay(100);
+                    Controls.CustomAlert.Show(AlertContainer, "Coming Soon", 
+                        "Settings feature will be available in a future update.", 
+                        Controls.CustomAlert.AlertType.Info);
+                }));
+            });
+            menuItems.Children.Add(settingsBtn);
+
+            // Logout
+            var logoutBtn = CreateDropdownButton("⏻", "Logout", () =>
+            {
+                System.Diagnostics.Debug.WriteLine("🔽 Logout button clicked");
+                CloseCustomDropdown();
+                
+                // Use Dispatcher.BeginInvoke for UI operations
+                Dispatcher.BeginInvoke(new Action(async () =>
+                {
+                    await Task.Delay(200);
+                    await LogoutAsync();
+                }));
+            }, true);
+            menuItems.Children.Add(logoutBtn);
+
+            stackPanel.Children.Add(menuItems);
+            container.Child = stackPanel;
+            dropdown.Children.Add(container);
+
+            // Add to main grid with lower z-index than alerts
+            Panel.SetZIndex(dropdown, 2000);
+            
+            // Get the main grid (inside the border)
+            var mainBorder = this.Content as Border;
+            var mainGrid = mainBorder?.Child as Grid;
+            if (mainGrid != null)
+            {
+                mainGrid.Children.Add(dropdown);
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("❌ Could not find main grid to add dropdown");
+                return;
+            }
+
+            // Animate in
+            dropdown.Opacity = 0;
+            container.RenderTransform = new TranslateTransform(0, -10);
+            
+            var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200));
+            var slideIn = new DoubleAnimation(-10, 0, TimeSpan.FromMilliseconds(200));
+            
+            dropdown.BeginAnimation(OpacityProperty, fadeIn);
+            container.RenderTransform.BeginAnimation(TranslateTransform.YProperty, slideIn);
+        }
+
+        private Button CreateDropdownButton(string icon, string text, Action onClick, bool isDestructive = false)
+        {
+            return CreateDropdownButtonInternal(icon, text, () => Task.Run(onClick), isDestructive);
+        }
+
+        private Button CreateDropdownButton(string icon, string text, Func<Task> onClickAsync, bool isDestructive = false)
+        {
+            return CreateDropdownButtonInternal(icon, text, onClickAsync, isDestructive);
+        }
+
+        private Button CreateDropdownButtonInternal(string icon, string text, Func<Task> onClickAsync, bool isDestructive = false)
+        {
+            var button = new Button
+            {
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(16, 12, 16, 12),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Cursor = Cursors.Hand
+            };
+
+            var content = new StackPanel { Orientation = Orientation.Horizontal };
+            
+            var iconText = new TextBlock
+            {
+                Text = icon,
+                FontSize = 16,
+                Margin = new Thickness(0, 0, 12, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            
+            var textBlock = new TextBlock
+            {
+                Text = text,
+                FontSize = 14,
+                FontWeight = FontWeights.Medium,
+                Foreground = isDestructive ? new SolidColorBrush(Color.FromRgb(239, 68, 68)) : Brushes.White,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            
+            content.Children.Add(iconText);
+            content.Children.Add(textBlock);
+            button.Content = content;
+
+            // Hover effect
+            button.MouseEnter += (s, e) =>
+            {
+                button.Background = new SolidColorBrush(isDestructive ? 
+                    Color.FromRgb(127, 29, 29) : Color.FromRgb(45, 50, 65));
+            };
+            
+            button.MouseLeave += (s, e) =>
+            {
+                button.Background = Brushes.Transparent;
+            };
+
+            button.Click += async (s, e) => await onClickAsync();
+            
+            return button;
+        }
+
+        private void CloseCustomDropdown()
+        {
+            // Ensure this runs on the UI thread
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(() => CloseCustomDropdown());
+                return;
+            }
+
+            System.Diagnostics.Debug.WriteLine("🔽 CloseCustomDropdown called");
+            var dropdown = this.FindName("CustomProfileDropdown") as Grid;
+            if (dropdown != null)
+            {
+                System.Diagnostics.Debug.WriteLine("🔽 Dropdown found, starting fade out animation");
+                var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(150));
+                fadeOut.Completed += (s, e) =>
+                {
+                    System.Diagnostics.Debug.WriteLine("🔽 Fade out completed, removing dropdown");
+                    // Get the main grid (inside the border) and remove dropdown
+                    var mainBorder = this.Content as Border;
+                    var mainGrid = mainBorder?.Child as Grid;
+                    if (mainGrid != null && mainGrid.Children.Contains(dropdown))
+                    {
+                        mainGrid.Children.Remove(dropdown);
+                        System.Diagnostics.Debug.WriteLine("🔽 Dropdown removed successfully");
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine("❌ Could not find main grid or dropdown not in children");
+                    }
+                };
+                dropdown.BeginAnimation(OpacityProperty, fadeOut);
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("❌ Dropdown not found in CloseCustomDropdown");
             }
         }
 
@@ -997,45 +1635,103 @@ namespace BloticArena
 
         private async Task LogoutAsync()
         {
-            var result = MessageBox.Show("Are you sure you want to logout?", "Logout", MessageBoxButton.YesNo, MessageBoxImage.Question);
-            if (result == MessageBoxResult.Yes)
+            Controls.CustomAlert.Show(AlertContainer, "Logout", 
+                "Are you sure you want to logout?", 
+                Controls.CustomAlert.AlertType.Info, 
+                showCancel: true,
+                onOk: async (s, e) => {
+                    await PerformLogout();
+                },
+                okText: "Yes",
+                cancelText: "No");
+        }
+
+        private async Task PerformLogout()
+        {
+            System.Diagnostics.Debug.WriteLine("🔄 Starting logout process...");
+            
+            await Services.AuthService.Instance.LogoutAsync();
+            
+            // Clear all cached profile data
+            ClearProfileCache();
+            
+            // Reset profile button UI
+            ProfileButtonText.Text = "Login";
+            ProfileButtonIcon.Visibility = Visibility.Visible;
+            ProfileButtonAvatar.Visibility = Visibility.Collapsed;
+            ProfileButtonImageBrush.ImageSource = null;
+            ProfileButtonInitials.Visibility = Visibility.Visible;
+            
+            // Hide game count badge
+            var template = ProfileNavButton.Template;
+            if (template != null)
             {
-                await Services.AuthService.Instance.LogoutAsync();
-                
-                // Reset profile button UI
-                ProfileButtonText.Text = "Login";
-                ProfileButtonIcon.Visibility = Visibility.Visible;
-                ProfileButtonAvatar.Visibility = Visibility.Collapsed;
-                ProfileButtonImageBrush.ImageSource = null;
-                ProfileButtonInitials.Visibility = Visibility.Visible;
-                
-                // Hide game count badge
-                var template = ProfileNavButton.Template;
-                if (template != null)
+                var badge = template.FindName("GameCountBadge", ProfileNavButton) as Border;
+                if (badge != null)
                 {
-                    var badge = template.FindName("GameCountBadge", ProfileNavButton) as Border;
-                    if (badge != null)
-                    {
-                        badge.Visibility = Visibility.Collapsed;
-                    }
+                    badge.Visibility = Visibility.Collapsed;
+                }
+            }
+            
+            // Reset welcome overlay state
+            WelcomeOverlay.Visibility = Visibility.Collapsed;
+            WelcomeOverlay.Opacity = 1;
+            WelcomeText.Opacity = 0;
+            UsernameText.Opacity = 0;
+            UsernameText.Text = "";
+            
+            // Reset QR code panel state
+            QRCodePanel.Opacity = 1;
+            QRCodePanel.Visibility = Visibility.Collapsed;
+            QRCodePanel.RenderTransform = null;
+            
+            ShowToast("Logged Out", "You have been logged out successfully.", Controls.ToastNotification.ToastType.Success);
+            
+            System.Diagnostics.Debug.WriteLine("✅ Logout completed, cache cleared");
+            
+            // Show QR code with animation
+            await ShowQRCodeForLogin();
+        }
+
+        private void ClearProfileCache()
+        {
+            try
+            {
+                System.Diagnostics.Debug.WriteLine("🧹 Clearing profile cache...");
+                
+                // Clear profile UI fields
+                ProfileName.Text = "Demo";
+                ProfileRole.Text = "Co-Head";
+                ProfileEmail.Text = "kumardeepesh1911@gmail.com";
+                ProfilePhone.Text = "5646456456";
+                ProfileDepartment.Text = "ECE";
+                ProfileYear.Text = "Year 2";
+                
+                // Clear profile picture
+                ProfileAvatarBrush.ImageSource = null;
+                ProfileInitials.Visibility = Visibility.Visible;
+                ProfileInitials.Text = "U";
+                
+                // Clear games count
+                GamesRemainingCount.Text = "0";
+                TotalChancesCount.Text = "0";
+                
+                // Clear any cached images from memory
+                if (ProfileAvatarBrush.ImageSource is BitmapImage bitmap)
+                {
+                    bitmap.UriSource = null;
                 }
                 
-                // Reset welcome overlay state
-                WelcomeOverlay.Visibility = Visibility.Collapsed;
-                WelcomeOverlay.Opacity = 1;
-                WelcomeText.Opacity = 0;
-                UsernameText.Opacity = 0;
-                UsernameText.Text = "";
+                // Force garbage collection to clear image cache
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
                 
-                // Reset QR code panel state
-                QRCodePanel.Opacity = 1;
-                QRCodePanel.Visibility = Visibility.Collapsed;
-                QRCodePanel.RenderTransform = null;
-                
-                ShowToast("Logged Out", "You have been logged out successfully.", Controls.ToastNotification.ToastType.Success);
-                
-                // Show QR code with animation
-                await ShowQRCodeForLogin();
+                System.Diagnostics.Debug.WriteLine("✅ Profile cache cleared successfully");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ Error clearing cache: {ex.Message}");
             }
         }
 
@@ -1088,7 +1784,11 @@ namespace BloticArena
             ProfilePanel.Visibility = Visibility.Collapsed;
             
             // Delay to allow containers to be generated
-            Dispatcher.InvokeAsync(() => HideAddToHomeButtons(), System.Windows.Threading.DispatcherPriority.Loaded);
+            Dispatcher.InvokeAsync(() => 
+            {
+                HideAddToHomeButtons();
+                HideAppTypeLabels(); // Hide "Shortcut" and "Installed App" labels on home page
+            }, System.Windows.Threading.DispatcherPriority.Loaded);
         }
 
         private void HideAddToHomeButtons()
@@ -1103,6 +1803,47 @@ namespace BloticArena
                     {
                         button.Visibility = Visibility.Collapsed;
                     }
+                }
+            }
+        }
+
+        private void HideAppTypeLabels()
+        {
+            for (int i = 0; i < AppsItemsControl.Items.Count; i++)
+            {
+                var container = AppsItemsControl.ItemContainerGenerator.ContainerFromIndex(i) as FrameworkElement;
+                if (container != null)
+                {
+                    // Find the TextBlock that displays the app type (Shortcut, Installed App)
+                    var typeTextBlocks = FindVisualChildren<TextBlock>(container);
+                    foreach (var textBlock in typeTextBlocks)
+                    {
+                        // Check if this TextBlock is bound to the Type property
+                        var binding = textBlock.GetBindingExpression(TextBlock.TextProperty);
+                        if (binding?.ParentBinding?.Path?.Path == "Type")
+                        {
+                            textBlock.Visibility = Visibility.Collapsed;
+                        }
+                    }
+                }
+            }
+        }
+
+        private IEnumerable<T> FindVisualChildren<T>(DependencyObject parent) where T : DependencyObject
+        {
+            if (parent == null) yield break;
+
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is T typedChild)
+                {
+                    yield return typedChild;
+                }
+
+                foreach (var descendant in FindVisualChildren<T>(child))
+                {
+                    yield return descendant;
                 }
             }
         }
@@ -1191,6 +1932,11 @@ namespace BloticArena
                     
                     // Populate profile data
                     await PopulateProfileData(user);
+                    
+                    // Force refresh games statistics
+                    await UpdateGamesStatistics(user.Id.ToString());
+                    
+                    System.Diagnostics.Debug.WriteLine($"🎮 Profile page: Games statistics refreshed");
                 }
             }
             else
@@ -1219,110 +1965,303 @@ namespace BloticArena
         {
             try
             {
-                // Set basic user info
-                ProfileName.Text = user.Username ?? "User";
-                ProfileEmail.Text = user.Email ?? "No email";
-                ProfilePhone.Text = user.PhoneNumber ?? "No phone";
+                System.Diagnostics.Debug.WriteLine($"🔄 Populating profile data for user: {user.Id}");
                 
-                // Set initials
-                var initials = GetInitials(user.Username ?? user.Email ?? "U");
-                ProfileInitials.Text = initials;
-                
-                // Fetch profile from database to get role and avatar
+                // Fetch complete profile data from event_registrations and profiles
                 var client = Services.SupabaseService.Instance.Client;
                 if (client != null)
                 {
+                    // Get data from event_registrations (has most current info)
+                    var registrationResponse = await client
+                        .From<EventRegistration>()
+                        .Where(x => x.UserId == user.Id)
+                        .Where(x => x.PaymentStatus == "paid")
+                        .Get();
+
+                    // Get profile data
                     var profileResponse = await client
                         .From<Profile>()
                         .Where(x => x.Id == user.Id)
                         .Get();
-                    
+
+                    // Initialize with default values
+                    string fullName = user.Username ?? "User";
+                    string email = user.Email ?? "No email";
+                    string phone = user.PhoneNumber ?? "No phone";
+                    string role = "student";
+                    string department = "";
+                    int? year = null;
+                    string avatarUrl = null;
+
+                    // Get profile data first (has role and avatar)
                     if (profileResponse?.Models != null && profileResponse.Models.Count > 0)
                     {
                         var profile = profileResponse.Models[0];
                         
-                        // Load profile picture if available
-                        if (!string.IsNullOrEmpty(profile.AvatarUrl))
+                        role = profile.Role ?? "student";
+                        avatarUrl = profile.AvatarUrl;
+                        
+                        // Use profile name if available
+                        if (!string.IsNullOrEmpty(profile.FirstName))
                         {
-                            try
-                            {
-                                var bitmap = new BitmapImage();
-                                bitmap.BeginInit();
-                                bitmap.UriSource = new Uri(profile.AvatarUrl, UriKind.Absolute);
-                                bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                                bitmap.EndInit();
-                                
-                                ProfileAvatarBrush.ImageSource = bitmap;
-                                ProfileInitials.Visibility = Visibility.Collapsed;
-                                
-                                System.Diagnostics.Debug.WriteLine($"✅ Profile picture loaded from: {profile.AvatarUrl}");
-                            }
-                            catch (Exception ex)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"⚠️ Failed to load profile picture: {ex.Message}");
-                                // Keep showing initials on error
-                            }
+                            fullName = $"{profile.FirstName} {profile.LastName}".Trim();
                         }
-                    }
-                    
-                    // Fetch event registrations to get games remaining
-                    try
-                    {
-                        System.Diagnostics.Debug.WriteLine($"📊 Fetching registrations for user: {user.Id}");
-                        
-                        var registrationResponse = await client
-                            .From<EventRegistration>()
-                            .Where(x => x.UserId == user.Id)
-                            .Get();
-                        
-                        System.Diagnostics.Debug.WriteLine($"📊 Query returned {registrationResponse?.Models?.Count ?? 0} registrations");
-                        
-                        if (registrationResponse?.Models != null && registrationResponse.Models.Count > 0)
+                        else if (!string.IsNullOrEmpty(profile.FullName))
                         {
-                            // Sum up all games remaining from all registrations
-                            var totalGames = registrationResponse.Models.Sum(r => r.GamesRemaining);
-                            GamesRemainingCount.Text = totalGames.ToString();
-                            System.Diagnostics.Debug.WriteLine($"✅ Total games remaining across {registrationResponse.Models.Count} registrations: {totalGames}");
+                            fullName = profile.FullName;
+                        }
+                        
+                        // Use profile contact info if available
+                        email = profile.Email ?? email;
+                        phone = profile.Phone ?? phone;
+                        
+                        System.Diagnostics.Debug.WriteLine($"👤 Profile data: Name={fullName}, Role={role}, Avatar={!string.IsNullOrEmpty(avatarUrl)}");
+                    }
+
+                    // Override with registration data if available (more current)
+                    if (registrationResponse?.Models != null && registrationResponse.Models.Count > 0)
+                    {
+                        var registration = registrationResponse.Models[0];
+                        
+                        // Use registration data (prioritize over profile data)
+                        fullName = registration.FullName ?? fullName;
+                        email = registration.Email ?? email;
+                        phone = registration.Phone ?? phone;
+                        department = registration.Branch ?? department;
+                        year = registration.Year ?? year;
+                        
+                        System.Diagnostics.Debug.WriteLine($"📋 Registration data: Name={fullName}, Email={email}, Dept={department}, Year={year}");
+                    }
+
+                    System.Diagnostics.Debug.WriteLine($"🎯 Final values: Name={fullName}, Role={role}, Dept={department}, Year={year}");
+
+                    // Set all profile fields with actual backend data
+                    ProfileName.Text = fullName;
+                    ProfileEmail.Text = email;
+                    ProfilePhone.Text = phone;
+                    ProfileDepartment.Text = string.IsNullOrEmpty(department) ? "Department not set" : department;
+                    ProfileYear.Text = year.HasValue ? $"Year {year}" : "Year not set";
+                    
+                    System.Diagnostics.Debug.WriteLine($"🔄 UI Updated: Name={ProfileName.Text}, Dept={ProfileDepartment.Text}, Year={ProfileYear.Text}");
+                    
+                    // Format role for display
+                    ProfileRole.Text = FormatRole(role);
+                    
+                    // Set initials
+                    var initials = GetInitials(fullName);
+                    ProfileInitials.Text = initials;
+                    
+                    // Load profile picture if available
+                    if (!string.IsNullOrEmpty(avatarUrl))
+                    {
+                        try
+                        {
+                            var bitmap = new BitmapImage();
+                            bitmap.BeginInit();
+                            bitmap.UriSource = new Uri(avatarUrl, UriKind.Absolute);
+                            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                            bitmap.EndInit();
                             
-                            foreach (var reg in registrationResponse.Models)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"  - Event: {reg.EventId}, Games: {reg.GamesRemaining}");
-                            }
+                            ProfileAvatarBrush.ImageSource = bitmap;
+                            ProfileInitials.Visibility = Visibility.Collapsed;
+                            
+                            System.Diagnostics.Debug.WriteLine($"✅ Profile picture loaded from: {avatarUrl}");
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            GamesRemainingCount.Text = "0";
-                            System.Diagnostics.Debug.WriteLine($"⚠️ No registrations found for user: {user.Id}");
+                            System.Diagnostics.Debug.WriteLine($"⚠️ Failed to load profile picture: {ex.Message}");
+                            ProfileInitials.Visibility = Visibility.Visible;
                         }
                     }
-                    catch (Exception regEx)
+                    else
                     {
-                        System.Diagnostics.Debug.WriteLine($"❌ Error fetching games: {regEx.Message}");
-                        System.Diagnostics.Debug.WriteLine($"❌ Stack trace: {regEx.StackTrace}");
-                        GamesRemainingCount.Text = "0";
+                        ProfileInitials.Visibility = Visibility.Visible;
+                        ProfileAvatarBrush.ImageSource = null;
                     }
                     
-                    // TODO: Fetch total played from game_history
-                    TotalPlayedCount.Text = "0";
+                    // Fetch games data using completely rewritten logic
+                    System.Diagnostics.Debug.WriteLine($"🎮 About to call UpdateGamesStatistics for user: {user.Id}");
+                    await UpdateGamesStatistics(user.Id.ToString());
+                    
+                    // Force refresh AuthService games count
+                    await Services.AuthService.Instance.SyncGameCountAsync();
+                    
+                    // Also ensure AuthService games count is reflected in UI
+                    var authUser = Services.AuthService.Instance.CurrentUser;
+                    if (authUser != null)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"🎮 AuthService reports {authUser.GamesRemaining} games remaining");
+                        Dispatcher.Invoke(() =>
+                        {
+                            GamesRemainingCount.Text = authUser.GamesRemaining.ToString();
+                            System.Diagnostics.Debug.WriteLine($"🔄 Updated UI from AuthService - Games: {GamesRemainingCount.Text}");
+                        });
+                    }
+                    
+                    // Force UI update on main thread
+                    Dispatcher.Invoke(() =>
+                    {
+                        System.Diagnostics.Debug.WriteLine($"🔄 Current UI values - Games: {GamesRemainingCount.Text}, Total: {TotalChancesCount.Text}");
+                    });
                 }
                 
-                System.Diagnostics.Debug.WriteLine($"✅ Profile populated for: {user.Username}");
+                System.Diagnostics.Debug.WriteLine($"✅ Profile populated successfully");
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"❌ Error populating profile: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"❌ Stack trace: {ex.StackTrace}");
+                
+                // Set fallback values
+                ProfileName.Text = user.Username ?? "User";
+                ProfileEmail.Text = user.Email ?? "No email";
+                ProfilePhone.Text = user.PhoneNumber ?? "No phone";
+                ProfileRole.Text = "Student";
+                ProfileDepartment.Text = "";
+                ProfileYear.Text = "Year -";
+                GamesRemainingCount.Text = "0";
+                TotalChancesCount.Text = "0";
+            }
+        }
+
+        private string FormatRole(string role)
+        {
+            if (string.IsNullOrEmpty(role))
+                return "Student";
+                
+            // Convert role to display format
+            switch (role.ToLower())
+            {
+                case "student":
+                    return "Student";
+                case "co-head":
+                case "cohead":
+                    return "Co-Head";
+                case "head":
+                    return "Head";
+                case "admin":
+                    return "Admin";
+                case "faculty":
+                    return "Faculty";
+                default:
+                    return role; // Return as-is for custom roles
             }
         }
 
         private string GetInitials(string name)
         {
-            if (string.IsNullOrEmpty(name)) return "U";
-            
+            if (string.IsNullOrEmpty(name))
+                return "U";
+                
             var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length == 0) return "U";
-            if (parts.Length == 1) return parts[0].Substring(0, Math.Min(2, parts[0].Length)).ToUpper();
-            
-            return (parts[0][0].ToString() + parts[parts.Length - 1][0].ToString()).ToUpper();
+            if (parts.Length == 1)
+                return parts[0].Substring(0, 1).ToUpper();
+            else
+                return (parts[0].Substring(0, 1) + parts[parts.Length - 1].Substring(0, 1)).ToUpper();
+        }
+
+        /// <summary>
+        /// Completely rewritten method to fetch and update games statistics
+        /// </summary>
+        private async Task UpdateGamesStatistics(string userId)
+        {
+            try
+            {
+                System.Diagnostics.Debug.WriteLine($"🎮 [NEW] Fetching games statistics for user: {userId}");
+                
+                var client = Services.SupabaseService.Instance.Client;
+                if (client == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"❌ [NEW] Supabase client is null");
+                    GamesRemainingCount.Text = "0";
+                    TotalChancesCount.Text = "0";
+                    return;
+                }
+
+                // Step 1: Get all paid event registrations for the user
+                System.Diagnostics.Debug.WriteLine($"📊 [NEW] Step 1: Fetching paid registrations...");
+                
+                var userGuid = Guid.Parse(userId);
+                var registrationResponse = await client
+                    .From<EventRegistration>()
+                    .Where(x => x.UserId == userGuid)
+                    .Where(x => x.PaymentStatus == "paid")
+                    .Get();
+
+                System.Diagnostics.Debug.WriteLine($"📊 [NEW] Found {registrationResponse?.Models?.Count ?? 0} paid registrations");
+
+                if (registrationResponse?.Models == null || registrationResponse.Models.Count == 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"⚠️ [NEW] No paid registrations found");
+                    GamesRemainingCount.Text = "0";
+                    TotalChancesCount.Text = "0";
+                    return;
+                }
+
+                // Step 2: Calculate games remaining (sum from all paid registrations)
+                var gamesRemaining = registrationResponse.Models.Sum(r => r.GamesRemaining);
+                System.Diagnostics.Debug.WriteLine($"🎯 [NEW] Games Remaining: {gamesRemaining}");
+
+                // Step 3: Get event details to calculate total chances
+                System.Diagnostics.Debug.WriteLine($"📊 [NEW] Step 2: Fetching event details...");
+                
+                var eventIds = registrationResponse.Models.Select(r => r.EventId).ToList();
+                System.Diagnostics.Debug.WriteLine($"📊 [NEW] Event IDs: {string.Join(", ", eventIds)}");
+
+                var eventsResponse = await client
+                    .From<Event>()
+                    .Where(x => eventIds.Contains(x.Id))
+                    .Get();
+
+                System.Diagnostics.Debug.WriteLine($"📊 [NEW] Found {eventsResponse?.Models?.Count ?? 0} events");
+
+                // Step 4: Calculate total chances (sum of number_of_games from all events)
+                var totalChances = 0;
+                if (eventsResponse?.Models != null)
+                {
+                    foreach (var evt in eventsResponse.Models)
+                    {
+                        var eventGames = evt.NumberOfGames ?? 0;
+                        totalChances += eventGames;
+                        System.Diagnostics.Debug.WriteLine($"📊 [NEW] Event '{evt.Title}': {eventGames} games");
+                    }
+                }
+
+                System.Diagnostics.Debug.WriteLine($"🎯 [NEW] Total Chances: {totalChances}");
+
+                // Step 5: Update UI
+                Dispatcher.Invoke(() =>
+                {
+                    GamesRemainingCount.Text = gamesRemaining.ToString();
+                    TotalChancesCount.Text = totalChances.ToString();
+                    
+                    System.Diagnostics.Debug.WriteLine($"✅ [NEW] UI Updated - Games: {gamesRemaining}, Chances: {totalChances}");
+                });
+
+                // Step 6: Update AuthService user object
+                if (Services.AuthService.Instance.CurrentUser != null)
+                {
+                    Services.AuthService.Instance.CurrentUser.GamesRemaining = gamesRemaining;
+                    System.Diagnostics.Debug.WriteLine($"✅ [NEW] AuthService updated with {gamesRemaining} games");
+                }
+
+                // Debug: Print detailed registration info
+                foreach (var reg in registrationResponse.Models)
+                {
+                    System.Diagnostics.Debug.WriteLine($"📋 [NEW] Registration: Event={reg.EventId}, Games={reg.GamesRemaining}, Status={reg.PaymentStatus}");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ [NEW] Error in UpdateGamesStatistics: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"❌ [NEW] Stack trace: {ex.StackTrace}");
+                
+                Dispatcher.Invoke(() =>
+                {
+                    GamesRemainingCount.Text = "0";
+                    TotalChancesCount.Text = "0";
+                });
+            }
         }
 
         private void GenerateQRCode_Click(object sender, RoutedEventArgs e)

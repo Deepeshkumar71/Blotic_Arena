@@ -50,6 +50,13 @@ namespace BloticArena.Services
                 using (var httpClient = new System.Net.Http.HttpClient())
                 {
                     httpClient.Timeout = TimeSpan.FromSeconds(10);
+                    var response = await httpClient.GetAsync($"{SupabaseConfig.Url}/rest/v1/");
+                    System.Diagnostics.Debug.WriteLine($"📡 HTTP Status: {response.StatusCode}");
+                }
+                
+                using (var httpClient = new System.Net.Http.HttpClient())
+                {
+                    httpClient.Timeout = TimeSpan.FromSeconds(10);
                     try
                     {
                         var response = await httpClient.GetAsync($"{SupabaseConfig.Url}/rest/v1/");
@@ -58,7 +65,17 @@ namespace BloticArena.Services
                     catch (Exception httpEx)
                     {
                         System.Diagnostics.Debug.WriteLine($"❌ HTTP test failed: {httpEx.Message}");
-                        throw new Exception($"Cannot reach Supabase server. Please check your internet connection and firewall settings. Error: {httpEx.Message}", httpEx);
+                        
+                        // Provide specific error messages based on the type of error
+                        string userMessage = httpEx switch
+                        {
+                            System.Net.Http.HttpRequestException => "Cannot connect to Blotic Arena servers. Please check your internet connection.",
+                            TaskCanceledException => "Connection timeout. Please check your internet connection and try again.",
+                            System.Net.Sockets.SocketException => "Network error. Please check your internet connection and firewall settings.",
+                            _ => $"Connection failed: {httpEx.Message}"
+                        };
+                        
+                        throw new Exception(userMessage, httpEx);
                     }
                 }
 

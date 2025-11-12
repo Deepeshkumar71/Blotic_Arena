@@ -30,5 +30,33 @@ namespace BloticArena.Models
 
         [Column("status")]
         public string? Status { get; set; }
+
+        // Additional user information fields
+        [Column("full_name")]
+        public string? FullName { get; set; }
+
+        [Column("email")]
+        public string? Email { get; set; }
+
+        [Column("phone")]
+        public string? Phone { get; set; }
+
+        [Column("branch")]
+        public string? Branch { get; set; }
+
+        [Column("year")]
+        public int? Year { get; set; }
+
+        [Column("registration_date")]
+        public DateTime? RegistrationDate { get; set; }
+
+        [Column("notes")]
+        public string? Notes { get; set; }
+
+        [Column("payment_screenshot_url")]
+        public string? PaymentScreenshotUrl { get; set; }
+
+        [Column("additional_info")]
+        public object? AdditionalInfo { get; set; }
     }
 }

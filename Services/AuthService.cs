@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Timers;
 using BloticArena.Config;
@@ -74,17 +75,16 @@ namespace BloticArena.Services
                 _currentSessionId = Guid.NewGuid().ToString();
                 var deviceId = GetDeviceId();
 
-                // Create session in database directly
-                var newSession = new QRLoginSession
+                // Create session using the database function (which handles permissions properly)
+                var parameters = new Dictionary<string, object>
                 {
-                    SessionId = _currentSessionId,
-                    DesktopDeviceId = deviceId,
-                    StatusEnum = QRSessionStatus.Pending,
-                    CreatedAt = DateTime.UtcNow,
-                    ExpiresAt = DateTime.UtcNow.AddMinutes(SupabaseConfig.QRSessionExpirationMinutes)
+                    { "p_session_id", _currentSessionId },
+                    { "p_desktop_device_id", deviceId },
+                    { "p_expiration_minutes", SupabaseConfig.QRSessionExpirationMinutes }
                 };
 
-                await client.From<QRLoginSession>().Insert(newSession);
+                var result = await client.Rpc("create_qr_session", parameters);
+                System.Diagnostics.Debug.WriteLine($"📝 QR session function result: {result}");
 
                 System.Diagnostics.Debug.WriteLine($"✅ QR session created: {_currentSessionId}");
                 return _currentSessionId;
@@ -217,21 +217,54 @@ namespace BloticArena.Services
                     System.Diagnostics.Debug.WriteLine($"✅ Profile fetched: {profile.FullName ?? profile.Email}");
                 }
 
-                // Create user object with profile data
+                // If no profile found, try to get data from event_registrations
+                if (profile == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"🔍 Profile not found, checking event_registrations...");
+                    
+                    var registrationResponse = await client
+                        .From<EventRegistration>()
+                        .Where(x => x.UserId == userId)
+                        .Get();
+
+                    if (registrationResponse?.Models != null && registrationResponse.Models.Count > 0)
+                    {
+                        var registration = registrationResponse.Models.First();
+                        
+                        // Create a pseudo-profile from registration data
+                        profile = new Profile
+                        {
+                            Id = registration.UserId,
+                            FullName = registration.FullName ?? "User", // Use actual registration name
+                            Email = registration.Email ?? "No email", // Use actual registration email
+                            Phone = registration.Phone ?? "No phone", // Use actual registration phone
+                            CreatedAt = registration.RegisteredAt
+                        };
+                        
+                        System.Diagnostics.Debug.WriteLine($"✅ Created profile from event registration data");
+                    }
+                }
+
+                // Create user object with actual backend data
                 var user = new User
                 {
                     Id = userId,
-                    Username = profile?.FullName ?? profile?.Email ?? "Arena User",
+                    Username = $"{profile?.FirstName} {profile?.LastName}".Trim() ?? profile?.FullName ?? "Arena User",
                     PhoneNumber = profile?.Phone,
                     Email = profile?.Email,
                     CreatedAt = profile?.CreatedAt ?? DateTime.UtcNow,
                     LastLogin = DateTime.UtcNow
                 };
+                
+                System.Diagnostics.Debug.WriteLine($"🔧 Created user: ID={userId}, Username={user.Username}, Email={user.Email}");
 
                 _currentUser = user;
                 _isAuthenticated = true;
 
-                System.Diagnostics.Debug.WriteLine($"✅ Authentication successful! User: {user.Username}");
+                // Fetch games remaining for the user
+                await FetchGameSessionAsync();
+
+                System.Diagnostics.Debug.WriteLine($"✅ Authentication successful! User: {user.Username}, Games: {user.GamesRemaining}");
                 AuthenticationSucceeded?.Invoke(this, user);
 
                 // Save auth state locally
@@ -246,7 +279,7 @@ namespace BloticArena.Services
         }
 
         /// <summary>
-        /// Fetch active game session for current user
+        /// Fetch games remaining for current user from event registrations
         /// </summary>
         private async Task FetchGameSessionAsync()
         {
@@ -259,25 +292,38 @@ namespace BloticArena.Services
                 if (client == null)
                     return;
 
-                // Use RPC to get active session
-                var parameters = new Dictionary<string, object>
-                {
-                    { "p_user_id", _currentUser.Id }
-                };
-                var response = await client.Rpc("get_active_game_session", parameters);
+                System.Diagnostics.Debug.WriteLine($"🎮 Fetching games for user: {_currentUser.Id}");
 
-                // Parse response to get games remaining
-                // Note: This is a simplified version - you may need to adjust based on actual response format
-                if (response != null)
+                // Fetch event registrations with games remaining
+                var registrationResponse = await client
+                    .From<EventRegistration>()
+                    .Where(x => x.UserId == _currentUser.Id)
+                    .Where(x => x.PaymentStatus == "paid")
+                    .Get();
+
+                if (registrationResponse?.Models != null && registrationResponse.Models.Count > 0)
                 {
-                    System.Diagnostics.Debug.WriteLine($"📊 Fetched game session data");
-                    // Update user's games remaining from response
-                    // _currentUser.GamesRemaining = ... (parse from response)
+                    // Sum all games from all paid registrations
+                    var totalGames = registrationResponse.Models.Sum(r => r.GamesRemaining);
+                    _currentUser.GamesRemaining = totalGames;
+                    
+                    System.Diagnostics.Debug.WriteLine($"✅ Total games remaining: {totalGames}");
+                    foreach (var reg in registrationResponse.Models)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"  - Event: {reg.EventId}, Games: {reg.GamesRemaining}, Status: {reg.PaymentStatus}");
+                    }
+                }
+                else
+                {
+                    _currentUser.GamesRemaining = 0;
+                    System.Diagnostics.Debug.WriteLine($"⚠️ No paid registrations found for user: {_currentUser.Id}");
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"❌ Error fetching game session: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"❌ Error fetching games: {ex.Message}");
+                if (_currentUser != null)
+                    _currentUser.GamesRemaining = 0;
             }
         }
 
@@ -348,18 +394,49 @@ namespace BloticArena.Services
                 if (client == null)
                     return false;
 
+                // First try to find user in users table
                 var user = await client
                     .From<User>()
                     .Where(x => x.Id == authData.UserId)
                     .Single();
 
+                // If user not found in users table, try to find in event_registrations
+                if (user == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"🔍 User not found in users table, checking event_registrations...");
+                    
+                    var registrationResponse = await client
+                        .From<EventRegistration>()
+                        .Where(x => x.UserId == authData.UserId)
+                        .Get();
+
+                    if (registrationResponse?.Models != null && registrationResponse.Models.Count > 0)
+                    {
+                        var registration = registrationResponse.Models.First();
+                        
+                        // Create user object from registration data
+                        user = new User
+                        {
+                            Id = registration.UserId,
+                            Email = authData.PhoneNumber, // Use phone as email if no email
+                            PhoneNumber = authData.PhoneNumber,
+                            Username = authData.Username,
+                            GamesRemaining = 0 // Will be set by FetchGameSessionAsync
+                        };
+                        
+                        System.Diagnostics.Debug.WriteLine($"✅ Created user from event registration data");
+                    }
+                }
+
                 if (user != null)
                 {
                     _currentUser = user;
                     _isAuthenticated = true;
+                    
+                    // Fetch games remaining for auto-logged user
                     await FetchGameSessionAsync();
                     
-                    System.Diagnostics.Debug.WriteLine($"✅ Auto-login successful! User: {user.Username ?? user.PhoneNumber}");
+                    System.Diagnostics.Debug.WriteLine($"✅ Auto-login successful! User: {user.Username ?? user.PhoneNumber}, Games: {user.GamesRemaining}");
                     return true;
                 }
 
