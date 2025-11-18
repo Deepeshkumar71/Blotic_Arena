@@ -62,4 +62,16 @@
             </Setter>
         </Style>
     </Application.Resources>
+<Style x:Key="DropShadowEffect" TargetType="Border">
+    <Setter Property="Effect">
+        <Setter.Value>
+            <DropShadowEffect BlurRadius="10" 
+                            ShadowDepth="0" 
+                            Opacity="0.3" 
+                            Color="Black" 
+                            Direction="270" 
+                            RenderingBias="Quality"/>
+        </Setter.Value>
+    </Setter>
+</Style>
 </Application>
